@@ -1,0 +1,125 @@
+#!/bin/bash
+# \
+exec wish $0 ${1+"$@"}
+
+
+# settingwindow title
+wm title . LSPCI
+
+set curDevName ""
+
+# bordinfo: argv 0
+# 0 empty 
+# 1 cat argv 1
+# 2  run lspci -t
+# 3 run lspci -vvv -s argv 1
+set bordInfo 0
+
+if { $argc >= 1 } {
+    set bordInfo [lindex $argv 0]
+}
+
+if { $bordInfo == 1 } {
+        set curDevName "cat "
+        append  curDevName  [lindex $argv 1]
+} 
+if { $bordInfo == 2 } {
+        set curDevName "lspci -t"
+}
+if { $bordInfo == 3 } {
+        set curDevName "lspci -vvvv -s "
+        append  curDevName  [lindex $argv 1]
+}
+
+#creating the frame for buttons
+set f [frame .top -borderwidth 2]
+pack .top -side top -fill x
+
+#creating buttons
+button .top.quit -text Quit -command exit
+set but [button .top.run -text "Run it" -command Run]
+pack .top.quit .top.run -side right
+
+#creating the editing field and label
+#label .top.l -text Command: -padx 0
+#pack .top.l -side left
+
+# Create the menubutton and menu
+menubutton $f.ex -text Command -relief raised -menu $f.ex.m
+pack $f.ex -side left
+set m [menu $f.ex.m]
+$m add radio -label lspci -variable lspcicmd -value lspci -command RunMenu
+$m add radio -label "lspci -t" -variable lspcicmd -value "lspci -t" -command RunMenu
+$m add radio -label "lspci -vxs" -variable lspcicmd -value "lspci -vvv -xxx -s " -command RunMenu
+
+entry .top.cmd -width 20 -relief sunken \
+          -textvariable command
+pack .top.cmd -side left -fill x -expand true
+
+#binding command wirth keyboard
+bind .top.cmd <Return> Run
+bind .top.cmd <Control-c> Stop
+focus .top.cmd
+
+#creating text component to show returned data
+frame .t
+set log [text .t.log -width 100 -height 20 \
+    -borderwidth 2 -relief sunken -setgrid true \
+    -yscrollcommand {.t.scroll set}]
+scrollbar .t.scroll -command {.t.log yview}
+pack .t.scroll -side right -fill y
+pack .t.log -side left -fill both -expand true
+pack .t -side top -fill both -expand true
+
+if {$bordInfo >= 1} {
+    .top.cmd delete 0 end
+    .top.cmd insert end $curDevName
+    #focus .top.cmd
+     if [catch {open "|$command |& cat"} input] {
+        $log insert end $input\n
+    } else {
+       fileevent $input readable Log
+       $log insert end $command\n
+       $but config -text Stop -command Stop
+   }
+}
+
+#run the command and inputs the data
+proc Run {} {
+    global command input log but
+    
+    if [catch {open "|$command |& cat"} input] {
+        $log insert end $input\n
+    } else {
+       fileevent $input readable Log
+       $log insert end $command\n
+       $but config -text Stop -command Stop
+   }
+}
+
+#outputs data to screen
+proc Log {} {
+    global input log
+    if [eof $input] {
+       Stop
+   } else {
+      gets $input line
+      $log insert end $line\n
+      $log see end
+   }
+}
+
+#stop the program
+proc Stop {} {
+   global input but
+   catch {close $input}
+   $but config -text "Run it" -command Run
+}
+
+proc RunMenu {} {
+    global lspcicmd
+    .top.cmd delete 0 end
+    .top.cmd insert end $lspcicmd
+    focus .top.cmd
+}
+

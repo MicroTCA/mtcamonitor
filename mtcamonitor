@@ -1,0 +1,651 @@
+#!/bin/bash
+# \
+exec wish $0 ${1+"$@"}
+
+# utca_monitor
+# settingwindow title
+wm title . mTCA-MONITOR-pciehp
+
+#
+# slotname(i)
+# slotaddress(i)
+# slotswpath(i)
+# slotdev(i)
+# slotdevice(i)
+# slotpath(i)
+# drvfname(i)
+
+#creating the frame for buttons
+frame .btnframe -height 40 -bd 2 -relief groove 
+frame .mf 
+
+pack  .btnframe .mf -side top -fill x -expand true 
+
+proc getSwitchDit { buspattern } {
+    foreach subDevFile [exec "/usr/bin/find" /sys/devices/pci0000:00/ -name pci_bus] {
+        set busDirs [glob -nocomplain -type d $subDevFile/*]
+        foreach busd [lsort $busDirs] {
+            set busnum [file tail $busd]
+                if ([string equal $busnum $buspattern]) {
+                set swdir [file dirname [file dirname $busd]]
+                } 
+        }
+    }
+    return $swdir
+}
+
+set slotnum 1
+set dirs [glob -nocomplain -type d /sys/bus/pci/slots/*]
+if { [llength $dirs] > 0 } {
+    foreach d [lsort $dirs] {
+        set slotname($slotnum) [file tail $d]
+        set adrfilename $d
+        set slotpath($slotnum) $d
+        append adrfilename "/address"
+        set f [open $adrfilename]
+        gets $f slotaddress($slotnum)
+        close $f
+        set slotbusnum($slotnum) [ string range $slotaddress($slotnum) 0 6 ]
+        set slotswpath($slotnum)  [getSwitchDit $slotbusnum($slotnum)]
+        set slotdev($slotnum) [file tail $slotswpath($slotnum)]
+        set fv [open $slotswpath($slotnum)/vendor]
+        gets $fv slotvendor($slotnum)
+        close $fv
+        set fd [open $slotswpath($slotnum)/device]
+        gets $fd slotdevice($slotnum)
+        close $fd   
+        set slotnum [expr $slotnum + 1]
+    }
+} else {
+    puts stdout "(NO PCIEHP driver )"
+}
+#creating buttons
+button .btnframe.quit -text Quit -command exit
+set rstbut [button .btnframe.rscan -text "Rescan Bus" -command Rescan]
+set monbut [button .btnframe.monit -text "Run PCIe-Monitor" -command RunMon]
+set lspcibut [button .btnframe.lspci -text "Scan PCIe Bus" -command RunLspci]
+pack .btnframe.quit .btnframe.rscan .btnframe.monit .btnframe.lspci -side right -fill x -expand true 
+
+#creating frames for slots
+for {set i 1} {$i < $slotnum} {incr i 1} {
+
+   set slotframe($i) [frame .mf.$i -width 100 -height 640 -bd 1  -relief sunken]
+   set mchframe($i) [frame $slotframe($i).mcf -width 100 -bd 5  -relief groove]
+   
+   #creating MCH frames
+  set mchslot($i) 1
+  set slottxt $slotname($i)
+  set amcbtnonoff($i) [button $mchframe($i).onoff -text "SWITCH ON" -command amccmd]
+  set lspcislot($i) [button $mchframe($i).sltlspci -text "LSPCI" -command slot_lspci]
+  label $mchframe($i).slot -text $slottxt -padx 0
+  label $mchframe($i).mchdev -text Dev: -padx 0
+  set mchdeven($i) [entry  $mchframe($i).mchdeve -justify center -width 20 -bd 1 -relief sunken -state normal]
+  set mchdevend($i) [entry  $mchframe($i).mchdeved -justify center -width 20 -bd 1 -relief sunken -state normal]
+  $mchdeven($i) insert end  $slotdev($i)  
+  $mchdevend($i) insert end [string range $slotvendor($i) 2 end]:[string range $slotdevice($i) 2 end]      
+  pack $mchframe($i).slot $mchframe($i).mchdev $mchframe($i).mchdeve $mchframe($i).mchdeved \
+                                               $mchframe($i).onoff  $mchframe($i).sltlspci -side top -fill x -expand true 
+
+   #creating AMC frames
+   set amcframe($i) [frame $slotframe($i).amc -width 100 -bd 5  -relief sunken] 
+   set powerfilename $slotpath($i)
+   append powerfilename "/power"
+   set fpw [open $powerfilename]
+   gets $fpw chk
+   close $fpw
+
+   if {$chk == 1} {
+     set amcslotpwr($i) 1
+   } else {
+    set amcslotpwr($i) 0
+   }
+  
+   set slotpcidev "/sys/bus/pci/devices/"
+   append slotpcidev $slotaddress($i)
+   append slotpcidev ".0"
+   if {[file exist $slotpcidev]} {
+         set chkdev 1
+   } else {
+        set chkdev 0
+   }
+     
+   if {$chkdev == 1} {
+        $amcframe($i) config -relief groove
+        set amcslot($i) 1
+   } else {
+       set amcslot($i) 0
+   }
+  
+  #creating AMC labels and fields
+  label $amcframe($i).dev -text DEV: -padx 0
+  label $amcframe($i).ids -text IDs: -padx 0
+  label $amcframe($i).drv -text Driver: -padx 0
+  label $amcframe($i).fl -text DevFile: -padx 0
+  label $amcframe($i).bars -text BARs: -padx 0
+  
+  set amcdev($i) [entry  $amcframe($i).adev -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcids($i) [entry  $amcframe($i).aids -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcidss($i) [entry  $amcframe($i).aidss -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcdrv($i) [entry  $amcframe($i).adrv -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcdrvver($i) [entry  $amcframe($i).adrvver -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcfile($i) [entry  $amcframe($i).afl -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcbar1($i) [entry  $amcframe($i).abar1 -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcbar2($i) [entry  $amcframe($i).abar2 -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcbar3($i) [entry  $amcframe($i).abar3 -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcbar4($i) [entry  $amcframe($i).abar4 -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcbar5($i) [entry  $amcframe($i).abar5 -justify center -width 20 -bd 1 -relief sunken -state disabled]
+  set amcbar6($i) [entry  $amcframe($i).abar6 -justify center -width 20 -bd 1 -relief sunken -state disabled]
+
+  set amcbtnpcierw($i) [button $amcframe($i).pcimonrw -text "PCIe-R/W" -state disabled -command amccmdpcierw]
+  set amcbtnpcie($i) [button $amcframe($i).pcimon -text "PCIe-monitor" -state disabled -command amccmdpcie]
+  set amcbtnpciedev($i) [button $amcframe($i).pciedev -text "Bind pciedev" -state disabled -command amccmdpciedev]
+  set amcbtninfo($i) [button $amcframe($i).info -text "INFO" -state disabled -command amccmdinfo]
+  set amclspci($i) [button $amcframe($i).amcls -text "LSPCI" -state disabled -command amc_lspci]
+
+   if {$amcslot($i) == 1} {
+   
+      if {$amcslotpwr($i) == 1} {
+         $amcbtnonoff($i) config -text "SWITCH OFF" 
+     }
+     $amcids($i) config -state normal
+     $amcidss($i) config -state normal
+     $amcdev($i) config -state normal
+     $amclspci($i) config -state normal
+     
+     set amcpath($i) "/sys/bus/pci/devices/"
+     append amcpath($i) $slotaddress($i) 
+     append amcpath($i) ".0"
+     if {[file exist $amcpath($i)/pci_bus]} {
+         set subamcpath($i) [glob -nocomplain -type d $amcpath($i)/0000:*]
+         set amcpath($i) [lindex [lsort $subamcpath($i)] 0]
+     }
+     
+     set vendorfilename $amcpath($i)
+     append vendorfilename "/vendor"
+     set amc_ids "0000"
+     if {[file exist $vendorfilename]} {
+         set fid [open $vendorfilename]
+         gets $fid amc_ids
+         close $fid
+     }
+     set devicefilename $amcpath($i)
+     append devicefilename "/device"
+     set amc_idsd "0000"
+     if {[file exist $devicefilename]} {
+         set fidd [open $devicefilename]
+         gets $fidd amc_idsd
+         close $fidd
+     }
+     $amcids($i) insert end [string range $amc_ids 2 end]:[string range $amc_idsd 2 end]
+     set vendorfilename $amcpath($i)
+     append vendorfilename "/subsystem_vendor"
+     set amc_ids "0000"
+     if {[file exist $vendorfilename]} {
+         set fid [open $vendorfilename]
+         gets $fid amc_ids
+         close $fid
+     }
+     set devicefilename $amcpath($i)
+     append devicefilename "/subsystem_device"
+     set amc_idsd "0000"
+     if {[file exist $devicefilename]} {
+         set fidd [open $devicefilename]
+         gets $fidd amc_idsd
+         close $fidd
+     }
+     $amcidss($i) insert end [string range $amc_ids 2 end]:[string range $amc_idsd 2 end]
+     $amcdev($i) insert end  [file tail $amcpath($i)]
+     set nodriver "NO DRIVER"
+     set devfilenm "/dev/dummy"
+     if {[file exist $amcpath($i)/driver]} {
+         $amcdrv($i) config -state normal
+         $amcdrvver($i) config -state normal
+         $amcbtnpcierw($i) config -state normal
+         $amcbtnpcie($i) config -state normal
+         $amcdrv($i) insert end  [file tail [file readlink $amcpath($i)/driver]]
+         set slotdrvname($i) [file tail [file readlink $amcpath($i)/driver]]
+         set drvverpath "/sys/module/"
+         append drvverpath $slotdrvname($i)
+         append drvverpath "/version"
+         if {[file exist $drvverpath]} {
+             set drvverid [open $drvverpath]
+             gets $drvverid curdrvver
+             close $drvverid
+             $amcdrvver($i) insert end  $curdrvver
+         }
+         #finde device file
+         set nfdir "/sys/class/"
+         append nfdir $slotdrvname($i)
+         append nfdir "/*"
+         set fdir [glob -nocomplain -type d $nfdir]
+         if {[llength $fdir] > 0} {
+              foreach fd [lsort $fdir] {
+                  set cdrvfname [file tail $fd]
+                  set fdend "s"
+                  append fdend $slotname($i)
+                  if {[ string equal $fdend [string rang $cdrvfname end-[expr [string length $fdend] -1] end] ] } {
+                      set devfilenm $cdrvfname
+                      set drvfname($i) $cdrvfname
+                 }
+              }
+         $amcfile($i) config -state normal
+         $amcfile($i) insert end  $devfilenm
+         }
+     } else {
+        $amcdrv($i) config -state normal
+        $amcdrv($i) insert end  $nodriver
+        $amcdrv($i) config -state disable
+        set slotdrvname($i) "***"
+        set drvfname($i) ""
+        $amcbtnpciedev($i) config -state normal
+     }
+
+     set resorcefilename $amcpath($i)
+     append resorcefilename "/resource"     
+     if {[file exist $resorcefilename]} {
+         $amcbar1($i) config -state normal
+         $amcbar2($i) config -state normal
+         $amcbar3($i) config -state normal
+         $amcbar4($i) config -state normal
+         $amcbar5($i) config -state normal
+         $amcbar6($i) config -state normal
+         set resid [open $resorcefilename]
+         set reslines [split [read $resid] \n]
+         close $resid
+         
+         $amcbar1($i) insert end [expr [lindex [split [lindex $reslines 0] " "] 1] - [lindex [split [lindex $reslines 0] " "] 0]]
+         $amcbar2($i) insert end [expr [lindex [split [lindex $reslines 1] " "] 1] - [lindex [split [lindex $reslines 1] " "] 0]]
+         $amcbar3($i) insert end [expr [lindex [split [lindex $reslines 2] " "] 1] - [lindex [split [lindex $reslines 2] " "] 0]]
+         $amcbar4($i) insert end [expr [lindex [split [lindex $reslines 3] " "] 1] - [lindex [split [lindex $reslines 3] " "] 0]]
+         $amcbar5($i) insert end [expr [lindex [split [lindex $reslines 4] " "] 1] - [lindex [split [lindex $reslines 4] " "] 0]]
+         $amcbar6($i) insert end [expr [lindex [split [lindex $reslines 5] " "] 1] - [lindex [split [lindex $reslines 5] " "] 0]]
+     
+
+    } else {
+        $amcbar1($i) config -state disable
+        $amcbar2($i) config -state disable
+        $amcbar3($i) config -state disable
+        $amcbar4($i) config -state disable
+        $amcbar5($i) config -state disable
+        $amcbar6($i) config -state disable
+     }
+     
+     set bordinfofile($i) "/proc/"
+     append bordinfofile($i) $slotdrvname($i) 
+     append bordinfofile($i)  "s"
+     append bordinfofile($i)  $slotname($i)
+     if {[file exist $bordinfofile($i)]} {
+         $amcbtninfo($i) config -state normal
+     }
+  }
+  
+  pack $amcframe($i).dev $amcframe($i).adev $amcframe($i).ids $amcframe($i).aids  $amcframe($i).aidss  $amcframe($i).drv \
+         $amcframe($i).adrv $amcframe($i).adrvver $amcframe($i).fl  $amcframe($i).afl $amcframe($i).bars $amcframe($i).abar1 $amcframe($i).abar2  \
+         $amcframe($i).abar3 $amcframe($i).abar4 $amcframe($i).abar5 $amcframe($i).abar6 $amcbtnpcierw($i) $amcbtnpcie($i) \
+         $amcbtnpciedev($i) $amcbtninfo($i) $amclspci($i)  -side top -fill x -expand true 
+}
+
+for {set i 1} {$i < $slotnum} {incr i 1} {
+   pack propagate $slotframe($i) false
+   pack $slotframe($i).mcf $slotframe($i).amc -side top
+   pack $slotframe($i) -side left -fill x -expand true 
+}
+
+#creating button commands
+
+proc RunMon {} {
+    exec /usr/bin/pciewr &
+    #exec ./pciewr &
+}
+
+proc RunLspci {} {
+    exec /usr/bin/lspci_t &
+    #exec ./lspci_t &
+}
+
+proc amccmdpcie {} {
+    global amcbtnpcie slotnum slotname slotdrvname drvfname
+    for {set n 1} {$n < $slotnum} {incr n 1} {
+        if { [$amcbtnpcie($n) cget -state] == "active"} {
+            set activeSlotn $n
+        }
+    }
+    set curdevicename "/dev/"
+    #append curdevicename $slotdrvname($activeSlotn)
+    #append curdevicename "s"
+    #append curdevicename $slotname($activeSlotn)
+    append curdevicename $drvfname($activeSlotn)
+    exec "/usr/bin/pcie_monitor" $curdevicename &
+    #exec "./pciewr" $curdevicename &
+}
+
+proc amccmdpcierw {} {
+    global amcbtnpcierw slotnum slotname slotdrvname drvfname
+    for {set n 1} {$n < $slotnum} {incr n 1} {
+        if { [$amcbtnpcierw($n) cget -state] == "active"} {
+            set activeSlotn $n
+        }
+    }
+    set curdevicename "/dev/"
+    #append curdevicename $slotdrvname($activeSlotn)
+    #append curdevicename "s"
+    #append curdevicename $slotname($activeSlotn)
+    append curdevicename $drvfname($activeSlotn)
+    exec "/usr/bin/pciewr" $curdevicename &
+    #exec "./pciewr" $curdevicename &
+}
+
+proc amccmdinfo {} {
+    global amcbtninfo slotnum slotname slotdrvname
+    for {set n 1} {$n < $slotnum} {incr n 1} {
+        if { [$amcbtninfo($n) cget -state] == "active"} {
+            set activeSlotn $n
+        }
+    }
+    set curinfofile "/proc/"
+    append curinfofile $slotdrvname($activeSlotn)
+    append curinfofile "s"
+    append curinfofile $slotname($activeSlotn)
+    exec "/usr/bin/lspci_t" 1 $curinfofile &
+    #exec "./lspci_t" 1 $curinfofile &
+}
+
+proc amccmdpciedev {} {
+    global amcbtnpciedev slotnum slotname slotdrvname amcids amcidss
+
+    set pciedev_file "/sys/bus/pci/drivers/pciedev"
+    if {[file exist $pciedev_file]} {
+            set pciedev_run 1
+    } else {
+        exec "modprobe" pciedev
+    }
+    for {set n 1} {$n < $slotnum} {incr n 1} {
+        if { [$amcbtnpciedev($n) cget -state] == "active"} {
+            set activeSlotn $n
+        }
+    }
+    set pciedevpath "/sys/bus/pci/drivers/pciedev/new_id"
+    set bindcmd [string replace [$amcids($activeSlotn) get] 4 4 " "]
+    append bindcmd " "
+    append bindcmd [string replace [$amcidss($activeSlotn) get] 4 4 " "]
+    exec "echo" "$bindcmd" > $pciedevpath
+
+    Rescan
+}
+
+proc amccmd {} {
+    global amcbtnonoff slotnum slotname
+    
+    set curSlotPath "/sys/bus/pci/slots/"
+    for {set n 1} {$n < $slotnum} {incr n 1} {
+        if { [$amcbtnonoff($n) cget -state] == "active"} {
+            set activeSlot $n
+        }
+    }
+    append curSlotPath $slotname($activeSlot)
+    append curSlotPath "/power"
+    set btn_txt [$amcbtnonoff($activeSlot) cget -text]
+    if ([string equal $btn_txt  "SWITCH OFF"]) {
+       exec "echo" 0 > $curSlotPath
+    } else {
+       exec "echo" 1 > $curSlotPath
+    }
+    Rescan
+}
+
+proc slot_lspci {} {
+    global lspcislot slotnum slotname slotdev    
+    
+    for {set n 1} {$n < $slotnum} {incr n 1} {
+        if { [$lspcislot($n) cget -state] == "active"} {
+            set activeSlot $n
+        }
+    }
+    set curSlotPath $slotdev($activeSlot)
+    exec "/usr/bin/lspci_t" 3 $curSlotPath &
+}
+
+proc amc_lspci {} {
+    global amclspci slotnum slotname slotaddress    
+    
+    for {set n 1} {$n < $slotnum} {incr n 1} {
+        if { [$amclspci($n) cget -state] == "active"} {
+            set activeSlot $n
+        }
+    }
+    set curSlotPath $slotaddress($activeSlot)
+    exec "/usr/bin/lspci_t" 3 $curSlotPath &
+}
+
+proc Rescan {} {
+
+    global amcids
+    global amcidss
+    global amcdev
+    global amcdrv
+    global amcdrvver
+    global amcbar1
+    global amcbar2
+    global amcbar3
+    global amcbar4
+    global amcbar5
+    global amcbar6
+    global amcframe
+    global amcbtnonoff
+    global slotnum
+    global slotpath
+    global slotaddress
+    global amcbtnpciedev
+    global slotdrvname
+    global slotname
+    global amcbtninfo
+    global amcfile
+    global amcbtnpcie
+    global amcbtnpcierw
+    global amclspci
+    global drvfname
+
+    for {set i 1} {$i < $slotnum} {incr i 1} {
+   
+        $amcbtnonoff($i) config -text "SWITCH ON" 
+
+        $amcids($i) delete 0 end
+        $amcidss($i) delete 0 end
+        $amcdev($i) delete 0 end
+        $amcdrv($i) delete 0 end
+        $amcdrvver($i) delete 0 end
+        $amcfile($i) delete 0 end
+        $amcbar1($i) delete 0 end
+        $amcbar2($i) delete 0 end
+        $amcbar3($i) delete 0 end
+        $amcbar4($i) delete 0 end
+        $amcbar5($i) delete 0 end
+        $amcbar6($i) delete 0 end
+
+        $amcids($i) config -state disabled
+        $amcidss($i) config -state disabled
+        $amcdev($i) config -state disabled
+        $amcdrv($i) config -state disabled
+        $amcdrvver($i) config -state disabled
+        $amcfile($i) config -state disabled
+        $amcbtnpcierw($i) config -state disabled
+        $amcbtnpcie($i) config -state disabled
+        $amcbar1($i) config -state disabled
+        $amcbar2($i) config -state disabled
+        $amcbar3($i) config -state disabled
+        $amcbar4($i) config -state disabled
+        $amcbar5($i) config -state disabled
+        $amcbar6($i) config -state disabled
+        $amcbtnpciedev($i) config -state disable
+        $amcbtninfo($i) config -state disable
+        $amclspci($i) config -state disable
+
+        $amcframe($i) config -relief sunken
+
+        set powerfilename $slotpath($i)
+        append powerfilename "/power"
+        set fpw [open $powerfilename]
+        gets $fpw chk
+        close $fpw
+
+        if {$chk == 1} {
+                #$amcframe($i) config -relief groove
+                set amcslotpwr($i) 1
+        } else {
+                set amcslotpwr($i) 0
+        }
+	   
+        set slotpcidev "/sys/bus/pci/devices/"
+        append slotpcidev $slotaddress($i)
+        append slotpcidev ".0"
+        if {[file exist $slotpcidev]} {
+                set chkdev 1
+        } else {
+                set chkdev 0
+        }
+
+        if {$chkdev == 1} {
+                $amcframe($i) config -relief groove
+                set amcslot($i) 1
+        } else {
+                set amcslot($i) 0
+        }
+	  
+        if {$amcslot($i) == 1} {
+            if {$amcslotpwr($i) == 1} {
+               $amcbtnonoff($i) config -text "SWITCH OFF" 
+            }
+
+            $amcids($i) config -state normal
+            $amcidss($i) config -state normal
+            $amcdev($i) config -state normal
+            $amclspci($i) config -state normal
+
+            set amcpath($i) "/sys/bus/pci/devices/"
+            append amcpath($i) $slotaddress($i) 
+            append amcpath($i) ".0"
+            if {[file exist $amcpath($i)/pci_bus]} {
+                    set subamcpath($i) [glob -nocomplain -type d $amcpath($i)/0000:*]
+                    #set amcpath($i) $subamcpath($i)
+                    set amcpath($i) [lindex [lsort $subamcpath($i)] 0]
+            }
+            set vendorfilename $amcpath($i)
+            append vendorfilename "/vendor"
+            set amc_ids "0000"
+            if {[file exist $vendorfilename]} {
+                    set fid [open $vendorfilename]
+                    gets $fid amc_ids
+                    close $fid
+            }
+            set devicefilename $amcpath($i)
+            append devicefilename "/device"
+            set amc_idsd "0000"
+            if {[file exist $devicefilename]} {
+                    set fidd [open $devicefilename]
+                    gets $fidd amc_idsd
+                    close $fidd
+            }
+            $amcids($i) insert end [string range $amc_ids 2 end]:[string range $amc_idsd 2 end]
+            set vendorfilename $amcpath($i)
+            append vendorfilename "/subsystem_vendor"
+            set amc_ids "0000"
+            if {[file exist $vendorfilename]} {
+                    set fid [open $vendorfilename]
+                    gets $fid amc_ids
+                    close $fid
+            }
+            set devicefilename $amcpath($i)
+            append devicefilename "/subsystem_device"
+            set amc_idsd "0000"
+            if {[file exist $devicefilename]} {
+                    set fidd [open $devicefilename]
+                    gets $fidd amc_idsd
+                    close $fidd
+            }
+            $amcidss($i) insert end [string range $amc_ids 2 end]:[string range $amc_idsd 2 end]
+            $amcdev($i) insert end  [file tail $amcpath($i)]
+            set nodriver "NO DRIVER"
+            set devfilenm "/dev/dummy"
+            if {[file exist $amcpath($i)/driver]} {
+                    $amcdrv($i) config -state normal
+                    $amcdrvver($i) config -state normal
+                    $amcbtnpcierw($i) config -state normal
+                    $amcbtnpcie($i) config -state normal
+                    $amcdrv($i) insert end  [file tail [file readlink $amcpath($i)/driver]]
+                    set slotdrvname($i) [file tail [file readlink $amcpath($i)/driver]]
+                    set drvverpath "/sys/module/"
+                    append drvverpath $slotdrvname($i)
+                    append drvverpath "/version"
+                    if {[file exist $drvverpath]} {
+                            set drvverid [open $drvverpath]
+                            gets $drvverid curdrvver
+                            close $drvverid
+                            $amcdrvver($i) insert end  $curdrvver
+                    }
+                    
+                    #finde device file
+	   set nfdir "/sys/class/"
+	   append nfdir $slotdrvname($i)
+	   append nfdir "/*"
+	   set fdir [glob -nocomplain -type d $nfdir]
+	   if {[llength $fdir] > 0} {
+	       foreach fd [lsort $fdir] {
+		set cdrvfname [file tail $fd]
+		set fdend "s"
+		append fdend $slotname($i)
+		if {[ string equal $fdend [string rang $cdrvfname end-[expr [string length $fdend] -1] end] ] } {
+		    set devfilenm $cdrvfname
+		    set drvfname($i) $cdrvfname
+		}
+	       }
+	       $amcfile($i) config -state normal
+	       $amcfile($i) insert end  $devfilenm
+	   }
+            } else {
+                    $amcdrv($i) config -state normal
+                    $amcdrv($i) delete 0 end
+                    $amcdrv($i) insert end  $nodriver
+                    $amcdrv($i) config -state disable
+                    set slotdrvname($i) "***"
+                    set drvfname($i) ""
+                    $amcbtnpciedev($i) config -state normal
+            }
+
+            set resorcefilename $amcpath($i)
+            append resorcefilename "/resource"     
+            if {[file exist $resorcefilename]} {
+                    $amcbar1($i) config -state normal
+                    $amcbar2($i) config -state normal
+                    $amcbar3($i) config -state normal
+                    $amcbar4($i) config -state normal
+                    $amcbar5($i) config -state normal
+                    $amcbar6($i) config -state normal
+                    set resid [open $resorcefilename]
+                    set reslines [split [read $resid] \n]
+                    close $resid
+
+                    $amcbar1($i) insert end [expr [lindex [split [lindex $reslines 0] " "] 1] - [lindex [split [lindex $reslines 0] " "] 0]]
+                    $amcbar2($i) insert end [expr [lindex [split [lindex $reslines 1] " "] 1] - [lindex [split [lindex $reslines 1] " "] 0]]
+                    $amcbar3($i) insert end [expr [lindex [split [lindex $reslines 2] " "] 1] - [lindex [split [lindex $reslines 2] " "] 0]]
+                    $amcbar4($i) insert end [expr [lindex [split [lindex $reslines 3] " "] 1] - [lindex [split [lindex $reslines 3] " "] 0]]
+                    $amcbar5($i) insert end [expr [lindex [split [lindex $reslines 4] " "] 1] - [lindex [split [lindex $reslines 4] " "] 0]]
+                    $amcbar6($i) insert end [expr [lindex [split [lindex $reslines 5] " "] 1] - [lindex [split [lindex $reslines 4] " "] 0]]
+             } else {
+                    $amcbar1($i) config -state disable
+                    $amcbar2($i) config -state disable
+                    $amcbar3($i) config -state disable
+                    $amcbar4($i) config -state disable
+                    $amcbar5($i) config -state disable
+                    $amcbar6($i) config -state disable
+            }
+
+            set bordinfofile($i) "/proc/"
+            append bordinfofile($i) $slotdrvname($i) 
+            append bordinfofile($i)  "s"
+            append bordinfofile($i)  $slotname($i)
+            if {[file exist $bordinfofile($i)]} {
+                $amcbtninfo($i) config -state normal
+            }
+        }
+    }
+}

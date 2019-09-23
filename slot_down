@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if [ "x$1" == "x" ]; then
+	echo "Required one parameter"
+	exit -1
+fi
+
+echo "echo 0 > /sys/bus/pci/slots/${1}/power"
+#echo 0 > /sys/bus/pci/slots/${1}/power
+echo "${1}"

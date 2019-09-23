@@ -1,0 +1,6 @@
+cp /home/petros/doocs.git/doocs/tools/utility/mtcamonitor/* /home/petros/github/MicroTCA/mtcamonitor/
+cp /home/petros/doocs.git/doocs/tools/utility/mtcamonitor/*.h /home/petros/github/MicroTCA/mtcamonitor/
+cp /home/petros/doocs.git/doocs/tools/utility/mtcamonitor/*.cpp /home/petros/github/MicroTCA/mtcamonitor/
+cp /home/petros/doocs.git/doocs/tools/utility/mtcamonitor/Makefile /home/petros/github/MicroTCA/mtcamonitor/
+
+

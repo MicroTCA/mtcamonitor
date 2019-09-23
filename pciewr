@@ -1,0 +1,642 @@
+#!/bin/bash
+# \
+exec wish $0 ${1+"$@"}
+
+
+set title "PCIe Monitor  v2.0"
+set border 10
+wm title . $title
+
+set curDevName ""
+if { $argc >= 1 } {
+        set curDevName [lindex $argv 0]
+} 
+
+
+. configure -borderwidth 10
+
+set row 1
+label		.file_label  -text "Address map:"
+entry		.file_entry  -textvariable mapfile
+button		.file_browse -text "Browse" -command browse_map
+grid		.file_label  -row $row -column 1 -sticky w
+grid		.file_entry  -row $row -column 2 -sticky we -columnspan 5
+grid		.file_browse -row $row -column 7 -sticky we -columnspan 2
+incr row
+
+label		.device_label -text "Device:"
+entry		.device_entry -textvariable device
+button		.device_browse -text "Browse" -command browse_dev
+grid		.device_label -row $row -column 1 -sticky w
+grid		.device_entry -row $row -column 2 -sticky we -columnspan 5
+grid		.device_browse -row $row -column 7 -sticky we -columnspan 2
+incr row
+
+listbox		.items_list	-width 24	-yscrollcommand { .items_scroll set } 
+scrollbar	                  .items_scroll -command        { .items_list yview }
+grid		.items_list -row $row -column 1 -sticky wns   -rowspan 9 -columnspan 2
+grid		.items_scroll -row $row -column 3 -sticky wns -rowspan 9
+set row 3
+
+label		.bar_label -text "Bar:"
+tk_optionMenu	.bar_pcie bar "0" "1" "2" "3" "4" "5"
+grid			.bar_label -row $row -column 4 -sticky w
+grid			.bar_pcie   -row $row -column 5 -columnspan 4 -sticky we 
+incr row
+
+label		.mode_label -text "Data Mode:"
+tk_optionMenu	.mode_pcie mode "32" "16" "8"
+grid			.mode_label -row $row -column 4 -sticky w
+grid			.mode_pcie   -row $row -column 5 -columnspan 4 -sticky we 
+incr row
+
+label		.offs_label -text "Offset:"
+entry		.offs_entry -width 12 -textvariable offset
+label		.offs_size_label -text "Size:"
+entry		.offs_size_entry  -width 8 -textvariable size
+grid		.offs_label -row $row -column 4 -sticky w
+grid		.offs_entry -row $row -column 5 -sticky we 
+grid		.offs_size_label  -row $row -column 6 -sticky we
+grid		.offs_size_entry  -row $row -column 7 -sticky we -columnspan 2
+incr row
+
+label		.mask_label -text "Mask:"
+entry		.mask_entry -width 12 -textvariable mask
+label		.shift_label -text "Shift:"
+entry		.shift_entry  -width 8 -textvariable shift
+grid		.mask_label -row $row -column 4 -sticky w
+grid		.mask_entry -row $row -column 5 -sticky we 
+grid		.shift_label  -row $row -column 6 -sticky we
+grid		.shift_entry  -row $row -column 7 -sticky we -columnspan 2
+incr row
+
+label		.addr_label -text "Address:"
+label		.addr_value -textvariable addr
+grid		.addr_label -row $row -column 4 -sticky w
+grid		.addr_value -row $row -column 5 -sticky w  -columnspan 4
+incr row
+
+label		.data_label -text "Data:"
+entry		.data_entry -width 1 -textvariable data
+grid		.data_label -row $row -column 4 -sticky w
+grid		.data_entry -row $row -column 5 -sticky we -columnspan 4
+incr row
+
+label		.rad_label	                                    -text "Radix:"
+frame		.rad_frame
+radiobutton	.rad_frame.hex		-text "Hex"		-variable _radix	-value "hex"	-command switch_to_hex
+radiobutton	.rad_frame.dec		-text "Dec"		-variable _radix	-value "dec"	-command switch_to_dec
+radiobutton	.rad_frame.bin		-text "Bin"		-variable _radix	-value "bin"	-command switch_to_bin
+radiobutton	.rad_frame.ascii	                  -text "Ascii"	-variable _radix	-value "asc"	-command switch_to_asc
+
+grid		.rad_label	                  -row $row -column 4 -sticky w
+grid		.rad_frame 	-row $row -column 5 -sticky we -columnspan 4
+pack		.rad_frame.hex		-side left
+pack		.rad_frame.dec		-side left
+pack		.rad_frame.bin		-side left
+pack		.rad_frame.ascii	                  -side left
+incr row
+
+label		.btn_label	                                    -text "I/O:"
+frame		.btn -border 16
+button		.btn.read  -text "Read"  -command rd
+button		.btn.write -text "Write" -command wr
+button		.btn.plot   -text "Plot"    -command plot
+button		.btn.list    -text "List"     -command datalist
+pack		.btn.read  -side left
+pack		.btn.write -side left
+pack		.btn.plot   -side left
+pack		.btn.list    -side left
+grid		.btn_label	                  -row $row -column 4 -sticky w
+grid		.btn -row $row -column 5 -sticky we -columnspan 4
+incr row
+
+label		.dma_label	                                    -text "DMA:"
+frame		.dma -border 16
+label		.dma.speed_label -text "Mb/sec:"
+set DMA_speed             [entry		.dma.speed_entry  -width 8 -textvariable speed_txt]
+button		.dma.write -text "Write"   -command dma_wr
+button		.dma.plot   -text "Plot"     -command dma_plot
+button		.dma.list    -text "List"      -command dma_datalist
+pack		.dma.write -side left
+pack		.dma.plot  -side left
+pack		.dma.list  -side left
+pack		.dma.speed_label  -side left
+pack		.dma.speed_entry  -side left
+grid		.dma_label	                  -row $row -column 4 -sticky w
+grid		.dma -row $row -column 5 -sticky we -columnspan 4
+incr row
+
+frame		.sts -border 16
+label		.sts.sts_label -text "Status:"
+set STS_en                     [entry		.sts.sts_entry  -width 60 -bg gray75 -textvariable sts_txt] 
+button		.sts.mquit  -text "Quit"    -command exit
+pack		.sts.sts_label -side left
+pack		.sts.sts_entry  -side left -expand 1
+pack		.sts.mquit  -side right
+grid		.sts -row $row -column 1 -sticky we -columnspan 8
+
+set device $curDevName
+
+proc browse_dev {} {
+    global device
+    global STS_en
+
+    set types {
+            {{All Files}	* }
+    }
+    set device [tk_getOpenFile -initialdir /dev -parent . -filetypes $types ]
+    if {[file exist $device]} {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "DEVICE OPEN OK!"
+        $STS_en configure -state readonly
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH DEVICE"
+        $STS_en configure -state readonly
+     }
+}
+
+proc browse_map {} {
+    global mapfile
+    global map_name
+    global map_addr
+    global map_size
+    global map_mask
+    global map_shift
+    global STS_en
+
+    set types {
+        {{MAP Files}    {.map}	TEXT}
+            {{All Files}	*   }
+    }
+    set mapfile [tk_getOpenFile -parent . -filetypes $types ]
+    if {[file exist $mapfile]} {
+        set f [open $mapfile r]
+        .items_list delete 0 [.items_list size]
+        while {1} {
+            set line [gets $f]
+            if {[eof $f]} {
+                close $f
+                break
+            }
+            if { [ regexp {([A-Za-z_][A-Za-z0-9_]*)[ \t]+[0-9A-Fa-fx]+[ \t]+([0-9A-Fa-fx]+)[ \t]+([0-9A-Fa-fx]+)} $line full_match name addr size] } {
+                    .items_list insert [.items_list size] $name
+                    set map_addr($name) $addr
+                    set map_name($addr) $name
+                    set map_size($name) $size
+                    set map_mask($name) 0xFFFFFFFF
+                    set map_shift($name) 0	
+            } else {
+                    if { [ regexp {([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*):([0-9A-Fa-fx]+)-([0-9A-Fa-fx]+)} $line full_match name vect bit_start bit_stop] } {
+                            .items_list insert [.items_list size] $name
+                            set map_addr($name)  $map_addr($vect)
+                            set map_size($name)  $map_size($vect)
+                            set map_mask($name)  [ format "0x%X" [ expr  round(pow(2, ($bit_stop - $bit_start + 1)) - 1) ] ]
+                            set map_shift($name) $bit_start
+
+                    } else {
+                            if { [ regexp {([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*):([0-9A-Fa-fx]+)} $line full_match name vect bit] } {
+                                    .items_list insert [.items_list size] $name
+                                    set map_addr($name)  $map_addr($vect)
+                                    set map_size($name)  $map_size($vect)
+                                    set map_mask($name)  0x1
+                                    set map_shift($name) $bit
+                            }
+                    }
+            }	
+        }
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "MAP FILE OPEN OK!"
+        $STS_en configure -state readonly
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH MAP FILE"
+        $STS_en configure -state readonly
+     }
+}
+
+proc upd_offset { } {
+    global map_addr
+    global map_size
+    global map_mask
+    global map_shift	
+    global map_name
+    global offset
+    global size
+    global mask
+    global shift
+    global STS_en
+
+    if {[.items_list size]} {
+        set offset $map_addr([ .items_list get [ .items_list curselection]])
+        set size   $map_size([ .items_list get [ .items_list curselection]])
+        set mask   $map_mask([ .items_list get [ .items_list curselection]])
+        set shift  $map_shift([ .items_list get [ .items_list curselection]])
+        set cur_nm ([ .items_list get [ .items_list curselection]]
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 $cur_nm
+        $STS_en configure -state readonly
+        rd
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO MAP FILE"
+        $STS_en configure -state readonly
+     }
+}
+
+proc rd {} {
+    global bar
+    global mode
+    global addr
+    global offset
+    global device
+    global data
+    global radix
+    global mask
+    global shift
+    global STS_en
+
+    if {[file exist $device]} {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        set sts_inf "READ FROM "
+        append sts_inf $device  
+        $STS_en insert 0 $sts_inf
+        $STS_en configure -state readonly
+        set addr [ format "0x%X" [ expr { $offset } ] ]
+        set dec_data [ exec "/usr/bin/device_rw" $device 1 0 $addr $bar $mode ]
+        if { $dec_data < 0 } {
+            $STS_en configure -state normal
+            $STS_en delete 0 end
+            $STS_en insert 0 $dec_data
+            $STS_en insert 0 "READ ERROR: "
+            $STS_en configure -state readonly
+        } else {
+            set dec_data [ expr ($dec_data >> $shift) & $mask ]
+            switch $radix {
+                hex	{ set data [ format "0x%X" $dec_data]}
+                dec { set data $dec_data			 }
+                bin { set data [ num2bin $dec_data ]}
+                asc { set data [ num2str $dec_data ]}
+            }
+       }
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH DEVICE"
+        $STS_en configure -state readonly
+     }
+    
+}
+		    
+proc wr {} {
+    global bar
+    global mode
+    global addr
+    global offset
+    global device
+    global data
+    global radix	
+    global mask
+    global shift
+    global STS_en
+
+    if {[file exist $device]} {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        set sts_inf "WRITE INTO  "
+        append sts_inf $device  
+        $STS_en insert 0 $sts_inf
+        $STS_en configure -state readonly
+        switch $radix {
+                hex { set dec_data [ format "%d" $data]}
+                dec { set dec_data $data			 }
+                bin { set dec_data [ bin2dec $data ]}
+                asc { set dec_data [ str2dec $data ]}
+        }
+        set addr [ format "0x%X" [ expr { $offset } ] ]
+        if {$mask != 0xFFFFFFFF || $shift != 0} { 
+                set value [ exec "/usr/bin/device_rw" $device 1 0 $addr $bar $mode  "-" ]
+                set value [ expr $value & ~($mask << $shift) ]
+                set value [ expr  $value  | (($dec_data & $mask) << $shift) ]
+        } else {
+                #set value $dec_data
+                set value [ format "%x" $dec_data]
+        }
+        set dec_data [ exec "/usr/bin/device_rw" $device 0 $value $addr $bar $mode 1 0 "-"]
+        if { $dec_data < 0 } {
+            $STS_en configure -state normal
+            $STS_en delete 0 end
+            $STS_en insert 0 $dec_data
+            $STS_en insert 0 "WRITE ERROR: "
+            $STS_en configure -state readonly
+        } else {
+            $STS_en configure -state normal
+            $STS_en delete 0 end
+            $STS_en insert 0 "WRITE OK "
+            $STS_en configure -state readonly
+        }
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH DEVICE"
+        $STS_en configure -state readonly
+     }
+}
+
+proc plot {} {
+    global gnuplot
+    global device
+    global mode
+    global bar
+    global addr
+    global offset
+    global size
+    global STS_en
+
+    if {[file exist $device]} {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        set sts_inf "PLOT FROM DEVICE  "
+        append sts_inf $device  
+        $STS_en insert 0 $sts_inf
+        $STS_en configure -state readonly
+        set addr [ format "0x%X" [ expr { $offset } ] ]
+        exec "/usr/bin/device_rw" $device 1 0 $addr $bar $mode $size "-" | "hex_dec" > ~/.pcie_monitor.dat
+        puts	$gnuplot "plot '~/.pcie_monitor.dat' with lines"
+        flush	$gnuplot
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH DEVICE"
+        $STS_en configure -state readonly
+     }
+}
+
+proc dma_plot {} {
+    global username
+    global gnuplot
+    global device
+    global mode
+    global bar
+    global addr
+    global offset
+    global size
+    global STS_en
+    global DMA_speed
+
+    if {[file exist $device]} {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        set sts_inf "PLOT FROM DEVICE  "
+        append sts_inf $device  
+        $STS_en insert 0 $sts_inf
+        $STS_en configure -state readonly
+        set addr [ format "0x%X" [ expr { $offset } ] ]
+        file mkdir /tmp/$username
+        #exec "/usr/bin/device_rw" $device 2 0 $addr $bar $mode $size "-" | "hex_dec" > ~/.pcie_monitor.dat
+        exec "/usr/bin/device_rw" $device 2 0 $addr $bar $mode $size "-"  > /tmp/$username/pcie_monitor.dat
+        #exec "/usr/bin/device_rw" $device 2 0 $addr $bar $mode $size "-" 
+        set dat_file "/tmp/"
+        append dat_file $username
+        append dat_file "/pcie_monitor.dat"
+        set f [open $dat_file r]
+        set time_line [gets $f]
+        close $f
+        $DMA_speed configure -state normal
+        $DMA_speed delete 0 end
+        $DMA_speed insert 0 $time_line
+        $DMA_speed configure -state readonly
+
+        puts	$gnuplot "plot '/var/tmp/mtca_dma.dat' with lines"
+        flush	$gnuplot
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH DEVICE"
+        $STS_en configure -state readonly
+     }
+}
+
+proc datalist {} {
+    global username
+    global device
+    global mode
+    global bar
+    global addr
+    global offset
+    global size
+    global radix
+    global STS_en
+
+    if {[file exist $device]} {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        set sts_inf "DATA FROM DEVICE  "
+        append sts_inf $device  
+        $STS_en insert 0 $sts_inf
+        $STS_en configure -state readonly
+        set addr [ format "0x%X" [ expr { $offset } ] ]
+        file mkdir /tmp/$username
+       switch $radix {
+                hex { exec "/usr/bin/device_rw" $device 1 0 $addr $bar $mode $size "-"  > /tmp/$username/pcie_monitor.dat}
+                dec { exec "/usr/bin/device_rw" $device 1 0 $addr $bar $mode $size "-" | "hex_dec" > /tmp/$username/pcie_monitor.dat }
+                default { exec "/usr/bin/device_rw" $device 1 0 $addr $bar $mode $size "-"  > /tmp/$username/pcie_monitor.dat }
+        }
+        exec "/usr/bin/lspci_t" 1 /tmp/$username/pcie_monitor.dat &
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH DEVICE"
+        $STS_en configure -state readonly
+     }
+}
+
+proc dma_datalist {} {
+    global username
+    global device
+    global mode
+    global bar
+    global addr
+    global offset
+    global size
+    global radix
+    global STS_en
+    global DMA_speed
+
+    if {[file exist $device]} {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        set sts_inf "DATA FROM DEVICE  "
+        append sts_inf $device  
+        $STS_en insert 0 $sts_inf
+        $STS_en configure -state readonly
+        set addr [ format "0x%X" [ expr { $offset } ] ]
+        file mkdir /tmp/$username
+        exec "/usr/bin/device_rw" $device 2 0 $addr $bar $mode $size "-"  > /tmp/$username/pcie_monitor.dat
+        set dat_file "/tmp/"
+        append dat_file $username
+        append dat_file "/pcie_monitor.dat"
+        set f [open $dat_file r]
+        set time_line [gets $f]
+        close $f
+        $DMA_speed configure -state normal
+        $DMA_speed delete 0 end
+        $DMA_speed insert 0 $time_line
+        $DMA_speed configure -state readonly
+        exec "/usr/bin/lspci_t" 1 /var/tmp/mtca_dma.dat &
+    } else {
+        $STS_en configure -state normal
+        $STS_en delete 0 end
+        $STS_en insert 0 "NO SUCH DEVICE"
+        $STS_en configure -state readonly
+     }
+}
+
+#proc configure {} {
+#    global dev
+#    global conffile
+#
+#    puts "bootelka -a $base -d /dev/${dev} -f $conffile"
+#    set fd [open "|bootelka -a $base -d /dev/${dev} -f $conffile" r+]
+#    while {1} {
+#        set line [gets $fd]
+#        if {[eof $fd]} {
+#                close $fd
+#                break
+#        }
+#        puts "bootelka: $line"
+#    }
+#}
+
+proc str2dec {str} {
+	set num 0
+	set len [string length $str]
+	
+	for {set i 0} {$i < $len} {incr i} {
+		scan [string index $str [ expr {$len - $i - 1}] ] %c ascii
+		set num [ expr { $num + round(pow(0x100, $i)) * $ascii} ]
+    }
+	return $num
+}
+
+proc num2str {num} {
+	set str ""
+	while {$num > 0} {
+		set ascii [ expr {$num % 0x100} ]
+  	    set num   [ expr {$num / 0x100} ]
+		set char  [ format "%c" $ascii  ]
+  	    set str "$char$str"
+    }
+    return $str
+}
+
+proc num2bin {num} {
+	set bits ""
+	set trim 1
+	
+	for {set i 0} {$i < 32} {incr i} {
+		set bit [expr {(1 << (31 - $i)) & $num} ]
+		if {$bit} {
+			set trim 0
+			set bits "${bits}1"
+		} else {
+			if {$trim == 0} {
+		  	  set bits "${bits}0"
+			}
+		}
+	}
+	return $bits
+}
+
+proc bin2dec {bin} {
+	set num 0
+	set len [string length $bin]
+	for {set i 0} {$i < 32} {incr i} {
+		set bit [string index $bin [expr $len - $i -1] ]
+		if {$bit == "1"} {
+			set num [expr { $num + round(pow(2,$i)) * $bit } ]
+		}
+	}
+	return $num
+}
+
+proc switch_to_hex {} {
+  global radix	
+  global data
+  
+  switch $radix {
+	dec	{ set data [ format "0x%X" $data]}
+	bin { set data [ format "0x%X" [ bin2dec $data ]]}
+    asc { set data [ format "0x%X" [ str2dec $data ]] }
+  }
+  
+  set radix "hex"
+}
+
+proc switch_to_dec {} {
+  global radix	
+  global data
+  
+  switch $radix {
+	hex	{ set data [ format "%d" $data]}
+	bin { set data [ bin2dec $data ]}
+	asc { set data [ str2dec $data ]}
+  }
+
+  set radix "dec"
+}
+
+proc switch_to_bin {} {
+  global radix	
+  global data
+  
+  switch $radix {
+	hex	{ set data [ num2bin $data]}
+	dec { set data [ num2bin $data]}
+	asc { set data [ num2bin [str2dec $data] ] }
+  }
+
+  set radix "bin"
+}
+
+proc switch_to_asc {} {
+  global radix	
+  global data
+  
+  switch $radix {
+	hex	{ set data [ num2str $data]}
+	dec { set data [ num2str $data]}
+	bin { set data [ num2str [bin2dec $data]]}
+  }
+
+  set radix "asc"
+}
+
+bind .items_list <<ListboxSelect>> upd_offset
+
+# data_entry_validate
+			
+set offset	0
+set size	4
+set mask	0xFFFFFFFF
+set shift	0
+set sts_txt	""
+set speed_txt 0
+set data "0x0"
+set _radix "hex"
+set radix "hex"
+set username [ exec "whoami" ]
+set gnuplot [open "|gnuplot" w]	
+puts $gnuplot "set mouse"
+flush $gnuplot
+$STS_en insert 0 "OK"
+$STS_en configure -state readonly
+$DMA_speed configure -state readonly

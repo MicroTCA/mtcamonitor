@@ -21,9 +21,9 @@ DOOCSROOT = ../../..
 # to define DOOCSROOT as an absolute path
 include $(DOOCSROOT)/$(DOOCSARCH)/DEFINEDOOCSROOT
 
-OBJDIR = $(DOOCSROOT)/$(DOOCSARCH)/obj/tools/mtcamonitor
+OBJDIR = $(DOOCSROOT)/$(DOOCSARCH)/obj/tools/utility/mtcamonitor
 
-SRCDIR = $(DOOCSROOT)/source/tools/mtcamonitor
+SRCDIR = $(DOOCSROOT)/tools/utility/mtcamonitor
 
 # to define the arch dependend things
 include $(DOOCSROOT)/$(DOOCSARCH)/CONFIG
@@ -56,7 +56,8 @@ $(OBJDIR)/.depend depend:
 include $(OBJDIR)/.depend
 
 $(OBJDIR)/device_rw:    $(OBJDIR)/device_rw.o	
-		$(CC) -o $(OBJDIR)/device_rw $(OBJDIR)/device_rw.o
+		$(LINK.cc) $(LDFLAGS) $(CPPFLAGS)\
+		-o $(OBJDIR)/device_rw $(OBJDIR)/device_rw.o
 		@chmod g+w $(OBJDIR)/device_rw
 		@echo "---------------- device_rw done---------------"
 
